@@ -1,0 +1,125 @@
+plugins {
+    id "org.jetbrains.kotlin.jvm" version "1.3.10"
+    id "org.jetbrains.kotlin.plugin.spring" version "1.3.10"
+    id "org.springframework.boot" version "2.1.0.RELEASE"
+    id "io.spring.dependency-management" version "1.0.6.RELEASE"
+    id "com.gorylenko.gradle-git-properties" version "1.5.2"
+    id "groovy"
+    id "jacoco"
+    id "com.bmuschko.docker-spring-boot-application" version "4.0.4"
+    id "com.bmuschko.docker-remote-api" version "4.0.4"
+}
+
+import com.bmuschko.gradle.docker.tasks.container.*
+import com.bmuschko.gradle.docker.tasks.image.*
+
+group = "com.przemyslawsikora.demos"
+sourceCompatibility = 1.8
+targetCompatibility = 1.8
+
+compileKotlin {
+    kotlinOptions {
+        freeCompilerArgs = ["-Xjsr305=strict"]
+        jvmTarget = "1.8"
+    }
+}
+compileTestKotlin {
+    kotlinOptions {
+        freeCompilerArgs = ["-Xjsr305=strict"]
+        jvmTarget = "1.8"
+    }
+}
+
+repositories {
+    jcenter()
+}
+
+dependencies {
+    implementation "org.jetbrains.kotlin:kotlin-stdlib"
+    implementation "org.jetbrains.kotlin:kotlin-reflect"
+    implementation "org.springframework.boot:spring-boot-starter-web"
+    implementation "org.springframework.boot:spring-boot-starter-actuator"
+    implementation "org.springframework.boot:spring-boot-devtools"
+    implementation "org.springframework.boot:spring-boot-starter-logging"
+    implementation "com.fasterxml.jackson.module:jackson-module-kotlin"
+
+    testImplementation "org.springframework.boot:spring-boot-starter-test"
+    testImplementation "org.spockframework:spock-spring:1.2-groovy-2.5"
+    testImplementation("com.athaydes:spock-reports:1.6.1") {
+        transitive = false // this avoids affecting your version of Groovy/Spock
+    }
+}
+
+gitProperties {
+    extProperty = "gitProps"
+}
+generateGitProperties.outputs.upToDateWhen { false }
+bootJar {
+    manifest {
+        attributes(
+                "Implementation-Title": "Spring Examples",
+                "Implementation-Version": version,
+                "Commit-ID": "${-> project.ext.gitProps['git.commit.id']}",
+                "Commit-Time": "${-> project.ext.gitProps['git.commit.time']}"
+        )
+    }
+}
+
+build.dependsOn jacocoTestReport
+build.dependsOn jacocoTestCoverageVerification
+
+jacocoTestReport {
+    reports {
+        xml.enabled = true
+        csv.enabled = true
+        html.destination file("${buildDir}/reports/jacoco")
+    }
+}
+
+jacocoTestCoverageVerification {
+    violationRules {
+        rule {
+            enabled = true
+            element = "CLASS"
+            limit {
+                counter = "LINE"
+                value = "COVEREDRATIO"
+                minimum = 0.00
+            }
+        }
+    }
+}
+
+docker {
+    springBootApplication {
+        baseImage = "openjdk:8-alpine"
+        ports = [8080]
+    }
+}
+
+task dockerCreateContainer(type: DockerCreateContainer) {
+    dependsOn dockerBuildImage
+    targetImageId dockerBuildImage.getImageId()
+    containerName = project.name
+    portBindings = ["8080:8080"]
+    restartPolicy = "always"
+}
+
+task dockerStartContainer(type: DockerStartContainer) {
+    dependsOn dockerCreateContainer
+    targetContainerId dockerCreateContainer.getContainerId()
+}
+
+task dockerStopContainer(type: DockerStopContainer) {
+    containerId = project.name
+}
+
+task dockerRemoveContainer(type: DockerRemoveContainer) {
+    targetContainerId project.name
+    force = true
+}
+
+task dockerRemoveImage(type: DockerRemoveImage) {
+    targetImageId { project.group + "/" + project.name + ":" + project.version.toString().toLowerCase() }
+    force = true
+}
